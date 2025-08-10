@@ -1,0 +1,49 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Thumbnails
+._*
+
+# Files that might appear on external disks
+.Spotlight-V100
+.Trashes
+*.VolumeIcon.icns
+
+# Xcode and Derived Data
+build/
+DerivedData/
+*.moved-aside
+*.xccheckout
+*.xcuserstate
+*.xcscmblueprint
+
+# Xcode User Data (per-user and should not be versioned)
+find-your-images.xcodeproj/xcuserdata/
+find-your-images.xcodeproj/project.xcworkspace/xcuserdata/
+find-your-images.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/configuration/
+find-your-images.xcodeproj/xcshareddata/WorkspaceSettings.xcsettings
+
+# Swift Package Manager
+.build/
+.swiftpm/xcode/
+
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/
+fastlane/test_output/
+
+# Archives / Symbols
+*.ipa
+*.dSYM*
+*.xcarchive
+
+# Editor / Tooling
+.idea/
+.vscode/
+.history/
+*.swp
+*.swo
+
