@@ -69,8 +69,52 @@ struct ContentView: View {
     /// The image dropped by the user for searching. Displayed in the UI.
     @State private var queryImage: NSImage? = nil
 
-    /// The URL of the best matching image, if one was found.
-    @State private var matchURL: URL? = nil
+    /// Top search results for the last query.
+    struct SearchResult: Identifiable, Hashable {
+        let url: URL
+        let width: Int64
+        let height: Int64
+        let fileSize: Int64
+        let distance: Float
+        var id: String { url.path }
+    }
+    @State private var matchResults: [SearchResult] = []
+    @State private var resultsScrollId: UUID = UUID()
+
+    /// Lightweight on-demand thumbnail loader to ensure previews appear per row.
+    struct ThumbnailView: View {
+        let url: URL
+        let size: CGFloat
+        @State private var image: NSImage? = nil
+        @State private var didAttempt: Bool = false
+
+        var body: some View {
+            ZStack {
+                if let image = image {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFill()
+                } else if didAttempt {
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.15))
+                        .overlay(Image(systemName: "photo").foregroundColor(.secondary))
+                } else {
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.2))
+                        .overlay(ProgressView().scaleEffect(0.6))
+                }
+            }
+            .frame(width: size, height: size)
+            .clipped()
+            .cornerRadius(4)
+            .task(id: url) {
+                guard image == nil else { return }
+                didAttempt = true
+                image = FeaturePrintService.loadThumbnail(from: url, maxPixelSize: Int(size * 3))
+                    ?? FeaturePrintService.loadImage(from: url)
+            }
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -91,30 +135,56 @@ struct ContentView: View {
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
-                    if let queryImage = queryImage {
+                    if !matchResults.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Query Image:")
+                            Text("Top Matches:")
                                 .font(.subheadline)
-                            Image(nsImage: queryImage)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(maxHeight: 200)
-                                .border(Color.gray.opacity(0.3))
-                        }
-                    }
-                    if let matchURL = matchURL {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Best Match:")
-                                .font(.subheadline)
-                            if let matchedImage = FeaturePrintService.loadImage(from: matchURL) {
-                                Image(nsImage: matchedImage)
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(maxHeight: 200)
-                                    .border(Color.green.opacity(0.4))
+                            ScrollViewReader { proxy in
+                                ScrollView(.vertical, showsIndicators: true) {
+                                    LazyVStack(alignment: .leading, spacing: 8) {
+                                        Color.clear.frame(height: 0).id("top")
+                                        ForEach(matchResults) { result in
+                                        HStack(alignment: .top, spacing: 10) {
+                                    ThumbnailView(url: result.url, size: 96)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack(spacing: 6) {
+                                            Button(action: { revealInFinder(result.url) }) {
+                                                Text(result.url.lastPathComponent)
+                                                    .font(.subheadline)
+                                                    .lineLimit(1)
+                                                    .truncationMode(.middle)
+                                            }
+                                            .buttonStyle(.link)
+                                            Text(String(format: "(%.3f)", result.distance))
+                                                .font(.caption2)
+                                                .foregroundColor(.secondary)
+                                        }
+                                        Text("\(result.width)×\(result.height) px • \(formatBytes(result.fileSize))")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                        let root = containingRoot(for: result.url)
+                                        HStack(spacing: 6) {
+                                            Image(systemName: systemImageForFolder(root ?? result.url))
+                                                .foregroundColor(.secondary)
+                                            Text((root ?? result.url).lastPathComponent)
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
+                                    Spacer()
+                                }
+                                .padding(8)
+                                .background(Color.gray.opacity(0.07))
+                                .cornerRadius(6)
+                                        }
+                                    }
+                                    .padding(.vertical, 8)
+                                }
+                                .frame(height: 300)
+                                .onChange(of: matchResults) { _ in
+                                    withAnimation { proxy.scrollTo("top", anchor: .top) }
+                                }
                             }
-                            Text(matchURL.lastPathComponent)
-                                .foregroundColor(.secondary)
                         }
                     }
                 }
@@ -226,27 +296,34 @@ struct ContentView: View {
     /// A view representing the drop area. Accepts file URLs of images and
     /// triggers a search for the closest match upon drop.
     private var dropTarget: some View {
-        RoundedRectangle(cornerRadius: 8)
-            .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [6]))
-            .foregroundColor(Color.accentColor)
-            .frame(height: 160)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(NSColor.windowBackgroundColor).opacity(0.5))
-            )
-            .overlay(
+        ZStack {
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [6]))
+                .foregroundColor(Color.accentColor)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color(NSColor.windowBackgroundColor).opacity(0.5))
+                )
+            if let preview = queryImage {
+                Image(nsImage: preview)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(8)
+            } else {
                 Text("Drag & Drop Image Here")
                     .foregroundColor(.secondary)
-            )
-            .onDrop(of: [UTType.fileURL.identifier], isTargeted: nil) { providers in
-                guard let provider = providers.first else { return false }
-                _ = provider.loadObject(ofClass: URL.self) { url, error in
-                    if let url = url {
-                        searchForMatch(with: url)
-                    }
-                }
-                return true
             }
+        }
+        .frame(height: 180)
+        .onDrop(of: [UTType.fileURL.identifier], isTargeted: nil) { providers in
+            guard let provider = providers.first else { return false }
+            _ = provider.loadObject(ofClass: URL.self) { url, error in
+                if let url = url {
+                    searchForMatch(with: url)
+                }
+            }
+            return true
+        }
     }
 
     /// Opens an `NSOpenPanel` allowing the user to select a directory to index.
@@ -333,10 +410,23 @@ struct ContentView: View {
         var processedSinceLastUpdate = 0
         for fileURL in candidates {
             var archivedData: Data? = nil
+            var pixelWidth: Int64 = 0
+            var pixelHeight: Int64 = 0
+            var fileSizeBytes: Int64 = 0
             autoreleasepool {
                 do {
                     if let observation = try FeaturePrintService.generateFeaturePrint(for: fileURL) {
                         archivedData = try NSKeyedArchiver.archivedData(withRootObject: observation, requiringSecureCoding: true)
+                    }
+                    // Gather metadata
+                    if let image = NSImage(contentsOf: fileURL) {
+                        let rep = image.representations.first
+                        pixelWidth = Int64(rep?.pixelsWide ?? 0)
+                        pixelHeight = Int64(rep?.pixelsHigh ?? 0)
+                    }
+                    if let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
+                       let size = attrs[.size] as? NSNumber {
+                        fileSizeBytes = size.int64Value
                     }
                 } catch {
                     // Non‑fatal; skip problematic images
@@ -349,6 +439,9 @@ struct ContentView: View {
                     record.id = UUID()
                     record.url = fileURL.path
                     record.featurePrintData = data
+                    record.width = pixelWidth
+                    record.height = pixelHeight
+                    record.fileSize = fileSizeBytes
                 }
                 successfullyIndexed += 1
                 insertedSinceLastSave += 1
@@ -476,7 +569,40 @@ struct ContentView: View {
         return "folder"
     }
 
-    /// Computes the best matching image for the given query URL.
+    /// Returns the saved root folder that contains the provided file URL, if any.
+    private func containingRoot(for fileURL: URL) -> URL? {
+        let roots = IndexedFoldersStore.load().map { $0.standardizedFileURL }
+        let filePath = fileURL.standardizedFileURL.deletingLastPathComponent().path
+        for root in roots {
+            let rootPath = root.path
+            let rootWithSlash = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+            if filePath == rootPath || filePath.hasPrefix(rootWithSlash) {
+                return root
+            }
+        }
+        return nil
+    }
+
+    private func formatBytes(_ bytes: Int64) -> String {
+        let units = ["B", "KB", "MB", "GB", "TB"]
+        var size = Double(bytes)
+        var unitIndex = 0
+        while size >= 1024 && unitIndex < units.count - 1 {
+            size /= 1024
+            unitIndex += 1
+        }
+        if unitIndex == 0 {
+            return String(format: "%.0f %@", size, units[unitIndex])
+        } else {
+            return String(format: "%.1f %@", size, units[unitIndex])
+        }
+    }
+
+    private func revealInFinder(_ url: URL) {
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    /// Computes the top matching images for the given query URL.
     ///
     /// Reads the stored feature prints from Core Data, calculates the distance
     /// between the query image’s feature print and each stored print using
@@ -486,7 +612,7 @@ struct ContentView: View {
     /// - Parameter queryURL: The URL of the image dropped onto the UI.
     private func searchForMatch(with queryURL: URL) {
         queryImage = FeaturePrintService.loadImage(from: queryURL)
-        matchURL = nil
+        matchResults = []
         statusMessage = "Searching…"
         Task {
             do {
@@ -494,31 +620,40 @@ struct ContentView: View {
                     await MainActor.run { statusMessage = "Unable to generate feature print for query." }
                     return
                 }
-                var bestDistance: Float = Float.greatestFiniteMagnitude
-                var bestRecord: ImageRecord? = nil
+                var topResults: [SearchResult] = []
                 for record in records {
                     guard let observationData = try? NSKeyedUnarchiver.unarchivedObject(ofClass: VNFeaturePrintObservation.self, from: record.featurePrintData) else {
                         continue
                     }
                     do {
                         let distance = try FeaturePrintService.distance(between: queryObservation, and: observationData)
-                        if distance < bestDistance {
-                            bestDistance = distance
-                            bestRecord = record
-                        }
+                        let result = SearchResult(
+                            url: URL(fileURLWithPath: record.url),
+                            width: record.width,
+                            height: record.height,
+                            fileSize: record.fileSize,
+                            distance: distance
+                        )
+                        topResults.append(result)
                     } catch {
                         // Ignore mismatched feature print revisions
                         continue
                     }
                 }
-                if let match = bestRecord {
-                    let matchFileURL = URL(fileURLWithPath: match.url)
-                    await MainActor.run {
-                        matchURL = matchFileURL
-                        statusMessage = String(format: "Best match found (distance = %.4f)", bestDistance)
-                    }
-                } else {
+                // Sort by ascending distance and take top 5
+                topResults.sort { $0.distance < $1.distance }
+                topResults = Array(topResults.prefix(5))
+                if topResults.isEmpty {
                     await MainActor.run { statusMessage = "No match found." }
+                } else {
+                    await MainActor.run {
+                        matchResults = topResults
+                        if let best = topResults.first {
+                            statusMessage = String(format: "Top match distance = %.4f", best.distance)
+                        } else {
+                            statusMessage = "Matches found."
+                        }
+                    }
                 }
             } catch {
                 await MainActor.run { statusMessage = "Error during search: \(error.localizedDescription)" }

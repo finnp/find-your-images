@@ -36,10 +36,33 @@ enum FeaturePrintService {
     }
 
     /// Loads an `NSImage` from the given file URL.
-    ///
-    /// - Parameter url: The URL of the image file to load.
-    /// - Returns: An `NSImage` object if loading succeeds, or `nil` on failure.
+    /// Tries several strategies for robustness, in order of cost.
     static func loadImage(from url: URL) -> NSImage? {
-        return NSImage(contentsOf: url)
+        let fileURL = url.isFileURL ? url : URL(fileURLWithPath: url.path)
+        if let img = NSImage(contentsOf: fileURL) { return img }
+        if let img = NSImage(contentsOfFile: fileURL.path) { return img }
+        let byRef = NSImage(byReferencing: fileURL)
+        if byRef.isValid, byRef.size != .zero { return byRef }
+        if let data = try? Data(contentsOf: fileURL), let img = NSImage(data: data) { return img }
+        return nil
+    }
+
+    // Keeping thumbnail loader available (unused currently) in case we need
+    // faster large-image previews later.
+    static func loadThumbnail(from url: URL, maxPixelSize: Int) -> NSImage? {
+        let fileURL = url.isFileURL ? url : URL(fileURLWithPath: url.path)
+        guard let src = CGImageSourceCreateWithURL(fileURL as CFURL, nil) else { return loadImage(from: fileURL) }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageIfAbsent: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+        ]
+        guard let cgThumb = CGImageSourceCreateThumbnailAtIndex(src, 0, options as CFDictionary) else {
+            return loadImage(from: fileURL)
+        }
+        let size = NSSize(width: cgThumb.width, height: cgThumb.height)
+        let img = NSImage(size: size)
+        img.addRepresentation(NSBitmapImageRep(cgImage: cgThumb))
+        return img
     }
 }

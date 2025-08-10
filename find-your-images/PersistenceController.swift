@@ -86,7 +86,28 @@ struct PersistenceController {
         featurePrintAttribute.allowsExternalBinaryDataStorage = true
         featurePrintAttribute.isOptional = false
 
-        entity.properties = [idAttribute, urlAttribute, featurePrintAttribute]
+        // Image width in pixels
+        let widthAttribute = NSAttributeDescription()
+        widthAttribute.name = "width"
+        widthAttribute.attributeType = .integer64AttributeType
+        widthAttribute.isOptional = false
+        widthAttribute.defaultValue = 0
+
+        // Image height in pixels
+        let heightAttribute = NSAttributeDescription()
+        heightAttribute.name = "height"
+        heightAttribute.attributeType = .integer64AttributeType
+        heightAttribute.isOptional = false
+        heightAttribute.defaultValue = 0
+
+        // File size in bytes
+        let sizeAttribute = NSAttributeDescription()
+        sizeAttribute.name = "fileSize"
+        sizeAttribute.attributeType = .integer64AttributeType
+        sizeAttribute.isOptional = false
+        sizeAttribute.defaultValue = 0
+
+        entity.properties = [idAttribute, urlAttribute, featurePrintAttribute, widthAttribute, heightAttribute, sizeAttribute]
         model.entities = [entity]
         return model
     }

@@ -13,4 +13,7 @@ public class ImageRecord: NSManagedObject {
     @NSManaged public var id: UUID
     @NSManaged public var url: String
     @NSManaged public var featurePrintData: Data
+    @NSManaged public var width: Int64
+    @NSManaged public var height: Int64
+    @NSManaged public var fileSize: Int64
 }
