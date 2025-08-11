@@ -12,7 +12,7 @@ struct ImageReverseSearchApp: App {
     let persistenceController = PersistenceController.shared
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup("Find Your Images") {
             ContentView()
                 // Inject the managed object context into the environment so
                 // SwiftUI views can access it via the `@Environment` property wrapper.

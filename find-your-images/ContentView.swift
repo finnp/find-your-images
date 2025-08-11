@@ -122,23 +122,25 @@ struct ContentView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 20) {
             Picker("", selection: $selectedMode) {
                 Text("Search").tag(Mode.search)
                 Text("Import").tag(Mode.importing)
             }
             .pickerStyle(.segmented)
+            .padding(.bottom, 4)
 
             switch selectedMode {
             case .search:
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Drop an image below to search for a match:")
-                        .font(.headline)
+                    Text("Find visually similar images")
+                        .font(.title3.weight(.semibold))
+                        .foregroundColor(.primary)
                     dropTarget
                     if !matchResults.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Top Matches:")
-                                .font(.subheadline)
+                            Text("Top Matches")
+                                .font(.headline)
                             ScrollViewReader { proxy in
                                 ScrollView(.vertical, showsIndicators: true) {
                                     LazyVStack(alignment: .leading, spacing: 8) {
@@ -150,7 +152,7 @@ struct ContentView: View {
                                         HStack(spacing: 6) {
                                             Button(action: { revealInFinder(result.url) }) {
                                                 Text(result.url.lastPathComponent)
-                                                    .font(.subheadline)
+                                                    .font(.subheadline.weight(.medium))
                                                     .lineLimit(1)
                                                     .truncationMode(.middle)
                                             }
@@ -173,14 +175,15 @@ struct ContentView: View {
                                     }
                                     Spacer()
                                 }
-                                .padding(8)
-                                .background(Color.gray.opacity(0.07))
-                                .cornerRadius(6)
+                                .padding(12)
+                                .background(.regularMaterial)
+                                .cornerRadius(10)
+                                .shadow(color: Color.black.opacity(0.06), radius: 6, x: 0, y: 2)
                                         }
                                     }
                                     .padding(.vertical, 8)
                                 }
-                                .frame(height: 300)
+                                .frame(height: 360)
                                 .onChange(of: matchResults) { _ in
                                     withAnimation { proxy.scrollTo("top", anchor: .top) }
                                 }
@@ -193,8 +196,10 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(spacing: 12) {
                         Button(action: selectAndIndexFolder) {
-                            Text("Select Folder or Drive…")
+                            Label("Select Folder or Drive…", systemImage: "externaldrive")
                         }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
                         .disabled(isIndexing)
                         if isIndexing {
                             ProgressView(value: Double(processedCount), total: Double(max(totalToIndex, 1)))
@@ -247,7 +252,7 @@ struct ContentView: View {
                                                     .foregroundColor(.secondary)
                                                 VStack(alignment: .leading, spacing: 2) {
                                                     Text(folder.url.lastPathComponent)
-                                                        .font(.subheadline)
+                                                        .font(.subheadline.weight(.medium))
                                                     Text(folder.url.path)
                                                         .font(.caption)
                                                         .foregroundColor(.secondary)
@@ -261,12 +266,15 @@ struct ContentView: View {
                                                 folderPendingDeletion = folder.url
                                                 showDeleteAlert = true
                                             } label: {
-                                                Text("Delete")
+                                                Label("Delete", systemImage: "trash")
                                             }
+                                            .buttonStyle(.bordered)
+                                            .tint(.red)
                                         }
-                                        .padding(8)
-                                        .background(Color.gray.opacity(0.08))
-                                        .cornerRadius(6)
+                                        .padding(12)
+                                        .background(.regularMaterial)
+                                        .cornerRadius(10)
+                                        .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 1)
                                     }
                                 }
                             }
@@ -278,8 +286,10 @@ struct ContentView: View {
 
             Spacer()
         }
-        .padding()
-        .frame(minWidth: 500, minHeight: 600)
+        .padding(20)
+        .frame(minWidth: 560, minHeight: 640)
+        .controlSize(.large)
+        .font(.system(.body, design: .rounded))
         .overlay(alignment: .top) {
             if isToastVisible, let message = toastMessage {
                 ToastView(message: message)
@@ -311,24 +321,30 @@ struct ContentView: View {
     /// triggers a search for the closest match upon drop.
     private var dropTarget: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [6]))
-                .foregroundColor(Color.accentColor)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(NSColor.windowBackgroundColor).opacity(0.5))
+            RoundedRectangle(cornerRadius: 14)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color.accentColor.opacity(0.35), lineWidth: 1)
                 )
+                .shadow(color: Color.black.opacity(0.06), radius: 8, x: 0, y: 2)
             if let preview = queryImage {
                 Image(nsImage: preview)
                     .resizable()
                     .scaledToFit()
-                    .padding(8)
+                    .padding(12)
             } else {
-                Text("Drag & Drop Image Here")
-                    .foregroundColor(.secondary)
+                VStack(spacing: 8) {
+                    Image(systemName: "photo.on.rectangle.angled")
+                        .font(.system(size: 30, weight: .regular))
+                        .foregroundColor(.accentColor)
+                    Text("Drag & Drop or Click to Select")
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+                }
             }
         }
-        .frame(height: 180)
+        .frame(height: 200)
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: nil) { providers in
             guard let provider = providers.first else { return false }
             _ = provider.loadObject(ofClass: URL.self) { url, error in
@@ -337,6 +353,10 @@ struct ContentView: View {
                 }
             }
             return true
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            selectAndSearchImage()
         }
     }
 
@@ -353,6 +373,19 @@ struct ContentView: View {
                 IndexedFoldersStore.add(folderURL)
                 await indexImages(in: folderURL)
             }
+        }
+    }
+
+    /// Opens a file chooser and triggers a visual similarity search for the selected image.
+    private func selectAndSearchImage() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.image]
+        panel.prompt = "Search"
+        if panel.runModal() == .OK, let url = panel.url {
+            searchForMatch(with: url)
         }
     }
 
@@ -681,8 +714,26 @@ struct ContentView: View {
                     )
                     topResults.append(result)
                 }
-                topResults.sort { $0.distance < $1.distance }
-                topResults = Array(topResults.prefix(5))
+                topResults.sort { lhs, rhs in
+                    if lhs.distance != rhs.distance { return lhs.distance < rhs.distance }
+                    let lhsPixels = lhs.width * lhs.height
+                    let rhsPixels = rhs.width * rhs.height
+                    return lhsPixels > rhsPixels
+                }
+                let forced = topResults.filter { $0.distance <= 2.0 }
+                let remaining = topResults.filter { $0.distance > 2.0 }
+                let extraCount = max(10 - forced.count, 0)
+                var finalResults = forced + Array(remaining.prefix(extraCount))
+                // If there are more than 10 forced results, include them all as requested
+                // (list can exceed 10 in that case)
+                // Ensure deterministic order by distance, then resolution desc
+                finalResults.sort { lhs, rhs in
+                    if lhs.distance != rhs.distance { return lhs.distance < rhs.distance }
+                    let lhsPixels = lhs.width * lhs.height
+                    let rhsPixels = rhs.width * rhs.height
+                    return lhsPixels > rhsPixels
+                }
+                topResults = finalResults
                 if topResults.isEmpty {
                     await MainActor.run { showToast("No match found.") }
                 } else {
@@ -719,18 +770,19 @@ private struct ToastView: View {
     @State private var isPresented: Bool = true
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "info.circle")
+        HStack(spacing: 10) {
+            Image(systemName: "info.circle.fill")
+                .foregroundColor(.accentColor)
             Text(message)
-                .font(.subheadline)
-                .lineLimit(2)
+                .font(.callout.weight(.medium))
+                .lineLimit(3)
                 .multilineTextAlignment(.leading)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
         .background(.ultraThinMaterial)
-        .cornerRadius(8)
-        .shadow(radius: 6)
+        .cornerRadius(12)
+        .shadow(color: Color.black.opacity(0.12), radius: 10, x: 0, y: 4)
     }
 }
 
