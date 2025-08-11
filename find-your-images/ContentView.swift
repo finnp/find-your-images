@@ -82,6 +82,10 @@ struct ContentView: View {
     @State private var resultsScrollId: UUID = UUID()
     @State private var databaseSizeBytes: Int64 = 0
 
+    // Simple toast state
+    @State private var toastMessage: String? = nil
+    @State private var isToastVisible: Bool = false
+
     /// Lightweight on-demand thumbnail loader to ensure previews appear per row.
     struct ThumbnailView: View {
         let url: URL
@@ -131,11 +135,6 @@ struct ContentView: View {
                     Text("Drop an image below to search for a match:")
                         .font(.headline)
                     dropTarget
-                    if !statusMessage.isEmpty {
-                        Text(statusMessage)
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
                     if !matchResults.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Top Matches:")
@@ -281,6 +280,14 @@ struct ContentView: View {
         }
         .padding()
         .frame(minWidth: 500, minHeight: 600)
+        .overlay(alignment: .top) {
+            if isToastVisible, let message = toastMessage {
+                ToastView(message: message)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(1)
+                    .padding(.top, 12)
+            }
+        }
         .alert("Delete Indexed Folder?", isPresented: $showDeleteAlert, presenting: folderPendingDeletion) { url in
             Button("Delete", role: .destructive) {
                 Task {
@@ -378,7 +385,8 @@ struct ContentView: View {
             options: [.skipsHiddenFiles]
         ) else {
             await MainActor.run {
-                statusMessage = "Failed to enumerate folder."
+                showToast("Failed to enumerate folder.")
+                statusMessage = ""
                 isIndexing = false
                 currentIndexingFolder = nil
             }
@@ -395,7 +403,12 @@ struct ContentView: View {
         await MainActor.run {
             totalToIndex = candidates.count
             indexingStartDate = Date()
-            statusMessage = candidates.isEmpty ? "No new images to index." : "Indexing images…"
+            if candidates.isEmpty {
+                statusMessage = ""
+                showToast("No new images to index.")
+            } else {
+                statusMessage = "Indexing images…"
+            }
         }
 
         if candidates.isEmpty {
@@ -489,7 +502,12 @@ struct ContentView: View {
             currentFileName = ""
         }
         await MainActor.run {
-            statusMessage = successfullyIndexed == 0 ? "No new images indexed." : "Indexed \(successfullyIndexed) of \(totalToIndex) images."
+            if successfullyIndexed == 0 {
+                showToast("No new images indexed.")
+            } else {
+                showToast("Indexed \(successfullyIndexed) of \(totalToIndex) images.")
+            }
+            statusMessage = ""
             isIndexing = false
             currentIndexingFolder = nil
             recomputeFolderCountsFromRecords()
@@ -542,7 +560,7 @@ struct ContentView: View {
         }
 
         await MainActor.run {
-            statusMessage = "Deleted indexed folder: \(folderURL.lastPathComponent)"
+            showToast("Deleted indexed folder: \(folderURL.lastPathComponent)")
             folderPendingDeletion = nil
             recomputeFolderCountsFromRecords()
         }
@@ -643,11 +661,10 @@ struct ContentView: View {
     private func searchForMatch(with queryURL: URL) {
         queryImage = FeaturePrintService.loadImage(from: queryURL)
         matchResults = []
-        statusMessage = "Searching…"
         Task {
             do {
                 guard let queryDhash = FeaturePrintService.computeDHash(for: queryURL) else {
-                    await MainActor.run { statusMessage = "Unable to compute dHash for query." }
+                    await MainActor.run { showToast("Unable to compute dHash for query.") }
                     return
                 }
                 var topResults: [SearchResult] = []
@@ -667,19 +684,53 @@ struct ContentView: View {
                 topResults.sort { $0.distance < $1.distance }
                 topResults = Array(topResults.prefix(5))
                 if topResults.isEmpty {
-                    await MainActor.run { statusMessage = "No match found." }
+                    await MainActor.run { showToast("No match found.") }
                 } else {
                     await MainActor.run {
                         matchResults = topResults
                         if let best = topResults.first {
-                            statusMessage = String(format: "Top match Hamming distance = %.0f", best.distance)
+                            showToast(String(format: "Top match Hamming distance = %.0f", best.distance))
                         } else {
-                            statusMessage = "Matches found."
+                            showToast("Matches found.")
                         }
                     }
                 }
             }
         }
+    }
+
+    // MARK: - Toast helpers
+    private func showToast(_ message: String, duration: TimeInterval = 2.0) {
+        toastMessage = message
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
+            isToastVisible = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                isToastVisible = false
+            }
+        }
+    }
+}
+
+/// A lightweight toast view appearing at the top of the window.
+private struct ToastView: View {
+    let message: String
+    @State private var isPresented: Bool = true
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "info.circle")
+            Text(message)
+                .font(.subheadline)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial)
+        .cornerRadius(8)
+        .shadow(radius: 6)
     }
 }
 
