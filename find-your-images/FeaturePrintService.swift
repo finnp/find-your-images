@@ -1,6 +1,7 @@
 import Foundation
 import Vision
 import AppKit
+import CoreGraphics
 
 /// A utility responsible for generating image feature prints and computing
 /// distances between them. Feature prints encapsulate the salient visual
@@ -64,5 +65,60 @@ enum FeaturePrintService {
         let img = NSImage(size: size)
         img.addRepresentation(NSBitmapImageRep(cgImage: cgThumb))
         return img
+    }
+
+    /// Computes a 64-bit perceptual difference hash (dHash) for the image at the given URL.
+    ///
+    /// The algorithm downsamples the image to a 9x8 grayscale image and compares adjacent
+    /// pixels horizontally, setting one bit per comparison. The resulting 64-bit value is
+    /// robust to minor changes and correlates with visual similarity under Hamming distance.
+    /// - Parameter url: The image file URL.
+    /// - Returns: A 64-bit hash, or `nil` if the image cannot be decoded.
+    static func computeDHash(for url: URL) -> UInt64? {
+        let fileURL = url.isFileURL ? url : URL(fileURLWithPath: url.path)
+        guard let src = CGImageSourceCreateWithURL(fileURL as CFURL, nil),
+              let cgImage = CGImageSourceCreateImageAtIndex(src, 0, nil) else {
+            return nil
+        }
+
+        let targetWidth = 9
+        let targetHeight = 8
+        let colorSpace = CGColorSpaceCreateDeviceGray()
+        let bitmapInfo = CGImageAlphaInfo.none.rawValue
+        guard let ctx = CGContext(
+            data: nil,
+            width: targetWidth,
+            height: targetHeight,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else { return nil }
+        ctx.interpolationQuality = .none
+        ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
+
+        guard let dataPtr = ctx.data else { return nil }
+        let bytesPerRow = ctx.bytesPerRow
+        let buffer = dataPtr.bindMemory(to: UInt8.self, capacity: bytesPerRow * targetHeight)
+
+        var hash: UInt64 = 0
+        var bitIndex: Int = 0
+        for y in 0..<targetHeight {
+            let rowOffset = y * bytesPerRow
+            for x in 0..<(targetWidth - 1) { // compare horizontally (x vs x+1)
+                let left = buffer[rowOffset + x]
+                let right = buffer[rowOffset + x + 1]
+                if left > right {
+                    hash |= (1 << UInt64(bitIndex))
+                }
+                bitIndex += 1
+            }
+        }
+        return hash
+    }
+
+    /// Computes the Hamming distance between two 64-bit hashes.
+    static func hammingDistance(_ a: UInt64, _ b: UInt64) -> Int {
+        return (a ^ b).nonzeroBitCount
     }
 }

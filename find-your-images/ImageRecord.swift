@@ -16,4 +16,5 @@ public class ImageRecord: NSManagedObject {
     @NSManaged public var width: Int64
     @NSManaged public var height: Int64
     @NSManaged public var fileSize: Int64
+    @NSManaged public var dhash: Int64
 }

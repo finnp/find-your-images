@@ -33,6 +33,13 @@ struct PersistenceController {
             container.persistentStoreDescriptions.first?.url = URL(fileURLWithPath: "/dev/null")
         }
 
+        // Enable lightweight migration so adding optional attributes like `dhash`
+        // does not break existing stores.
+        if let desc = container.persistentStoreDescriptions.first {
+            desc.setOption(true as NSNumber, forKey: NSMigratePersistentStoresAutomaticallyOption)
+            desc.setOption(true as NSNumber, forKey: NSInferMappingModelAutomaticallyOption)
+        }
+
         // Load the persistent stores synchronously.
         container.loadPersistentStores { description, error in
             if let error = error as NSError? {
@@ -107,7 +114,14 @@ struct PersistenceController {
         sizeAttribute.isOptional = false
         sizeAttribute.defaultValue = 0
 
-        entity.properties = [idAttribute, urlAttribute, featurePrintAttribute, widthAttribute, heightAttribute, sizeAttribute]
+        // 64-bit perceptual dHash for visual similarity via Hamming distance
+        let dhashAttribute = NSAttributeDescription()
+        dhashAttribute.name = "dhash"
+        dhashAttribute.attributeType = .integer64AttributeType
+        dhashAttribute.isOptional = true
+        dhashAttribute.defaultValue = 0
+
+        entity.properties = [idAttribute, urlAttribute, featurePrintAttribute, widthAttribute, heightAttribute, sizeAttribute, dhashAttribute]
         model.entities = [entity]
         return model
     }

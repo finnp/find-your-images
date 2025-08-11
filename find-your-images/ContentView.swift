@@ -80,6 +80,7 @@ struct ContentView: View {
     }
     @State private var matchResults: [SearchResult] = []
     @State private var resultsScrollId: UUID = UUID()
+    @State private var databaseSizeBytes: Int64 = 0
 
     /// Lightweight on-demand thumbnail loader to ensure previews appear per row.
     struct ThumbnailView: View {
@@ -209,6 +210,11 @@ struct ContentView: View {
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
+                    HStack(spacing: 8) {
+                        Text("Database size:")
+                        Text(formatBytes(databaseSizeBytes))
+                            .foregroundColor(.secondary)
+                    }
                     if isIndexing {
                         VStack(alignment: .leading, spacing: 4) {
                             if let folder = currentIndexingFolder {
@@ -290,6 +296,7 @@ struct ContentView: View {
         }
         .onAppear {
             recomputeFolderCountsFromRecords()
+            databaseSizeBytes = computeDatabaseSize()
         }
     }
 
@@ -413,10 +420,14 @@ struct ContentView: View {
             var pixelWidth: Int64 = 0
             var pixelHeight: Int64 = 0
             var fileSizeBytes: Int64 = 0
+            var dhashValue: UInt64 = 0
             autoreleasepool {
                 do {
                     if let observation = try FeaturePrintService.generateFeaturePrint(for: fileURL) {
                         archivedData = try NSKeyedArchiver.archivedData(withRootObject: observation, requiringSecureCoding: true)
+                    }
+                    if let h = FeaturePrintService.computeDHash(for: fileURL) {
+                        dhashValue = h
                     }
                     // Gather metadata
                     if let image = NSImage(contentsOf: fileURL) {
@@ -442,6 +453,7 @@ struct ContentView: View {
                     record.width = pixelWidth
                     record.height = pixelHeight
                     record.fileSize = fileSizeBytes
+                    record.dhash = Int64(bitPattern: dhashValue)
                 }
                 successfullyIndexed += 1
                 insertedSinceLastSave += 1
@@ -481,6 +493,7 @@ struct ContentView: View {
             isIndexing = false
             currentIndexingFolder = nil
             recomputeFolderCountsFromRecords()
+            databaseSizeBytes = computeDatabaseSize()
         }
     }
 
@@ -602,6 +615,23 @@ struct ContentView: View {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
+    /// Computes the approximate on-disk size of the Core Data SQLite store.
+    private func computeDatabaseSize() -> Int64 {
+        let storeURL = PersistenceController.shared.container.persistentStoreDescriptions.first?.url
+            ?? PersistenceController.shared.container.persistentStoreCoordinator.persistentStores.first?.url
+        guard let baseURL = storeURL else { return 0 }
+        // SQLite store comprises main file + -shm + -wal (if journaling enabled)
+        let related = [baseURL, baseURL.appendingPathExtension("-shm"), baseURL.appendingPathExtension("-wal")]
+        var total: Int64 = 0
+        for url in related {
+            if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+               let size = attrs[.size] as? NSNumber {
+                total += size.int64Value
+            }
+        }
+        return total
+    }
+
     /// Computes the top matching images for the given query URL.
     ///
     /// Reads the stored feature prints from Core Data, calculates the distance
@@ -616,31 +646,24 @@ struct ContentView: View {
         statusMessage = "Searching…"
         Task {
             do {
-                guard let queryObservation = try FeaturePrintService.generateFeaturePrint(for: queryURL) else {
-                    await MainActor.run { statusMessage = "Unable to generate feature print for query." }
+                guard let queryDhash = FeaturePrintService.computeDHash(for: queryURL) else {
+                    await MainActor.run { statusMessage = "Unable to compute dHash for query." }
                     return
                 }
                 var topResults: [SearchResult] = []
                 for record in records {
-                    guard let observationData = try? NSKeyedUnarchiver.unarchivedObject(ofClass: VNFeaturePrintObservation.self, from: record.featurePrintData) else {
-                        continue
-                    }
-                    do {
-                        let distance = try FeaturePrintService.distance(between: queryObservation, and: observationData)
-                        let result = SearchResult(
-                            url: URL(fileURLWithPath: record.url),
-                            width: record.width,
-                            height: record.height,
-                            fileSize: record.fileSize,
-                            distance: distance
-                        )
-                        topResults.append(result)
-                    } catch {
-                        // Ignore mismatched feature print revisions
-                        continue
-                    }
+                    let recHash = UInt64(bitPattern: record.dhash)
+                    if recHash == 0 { continue }
+                    let dist = Float(FeaturePrintService.hammingDistance(queryDhash, recHash))
+                    let result = SearchResult(
+                        url: URL(fileURLWithPath: record.url),
+                        width: record.width,
+                        height: record.height,
+                        fileSize: record.fileSize,
+                        distance: dist
+                    )
+                    topResults.append(result)
                 }
-                // Sort by ascending distance and take top 5
                 topResults.sort { $0.distance < $1.distance }
                 topResults = Array(topResults.prefix(5))
                 if topResults.isEmpty {
@@ -649,14 +672,12 @@ struct ContentView: View {
                     await MainActor.run {
                         matchResults = topResults
                         if let best = topResults.first {
-                            statusMessage = String(format: "Top match distance = %.4f", best.distance)
+                            statusMessage = String(format: "Top match Hamming distance = %.0f", best.distance)
                         } else {
                             statusMessage = "Matches found."
                         }
                     }
                 }
-            } catch {
-                await MainActor.run { statusMessage = "Error during search: \(error.localizedDescription)" }
             }
         }
     }
