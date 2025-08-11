@@ -146,39 +146,54 @@ struct ContentView: View {
                                     LazyVStack(alignment: .leading, spacing: 8) {
                                         Color.clear.frame(height: 0).id("top")
                                         ForEach(matchResults) { result in
-                                        HStack(alignment: .top, spacing: 10) {
-                                    ThumbnailView(url: result.url, size: 96)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        HStack(spacing: 6) {
-                                            Button(action: { revealInFinder(result.url) }) {
-                                                Text(result.url.lastPathComponent)
-                                                    .font(.subheadline.weight(.medium))
-                                                    .lineLimit(1)
-                                                    .truncationMode(.middle)
+                                            HStack(alignment: .center, spacing: 12) {
+                                                VStack(alignment: .leading, spacing: 8) {
+                                                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                                        Image(systemName: "doc.fill")
+                                                            .foregroundColor(.secondary)
+                                                        Button(action: { revealInFinder(result.url) }) {
+                                                            Text(result.url.lastPathComponent)
+                                                                .font(.headline)
+                                                                .lineLimit(1)
+                                                                .truncationMode(.middle)
+                                                        }
+                                                        .buttonStyle(.link)
+                                                        let root = containingRoot(for: result.url)
+                                                        HStack(spacing: 6) {
+                                                            Image(systemName: systemImageForFolder(root ?? result.url))
+                                                            Text((root ?? result.url).lastPathComponent)
+                                                        }
+                                                        .font(.caption.weight(.semibold))
+                                                        .padding(.horizontal, 8)
+                                                        .padding(.vertical, 4)
+                                                        .background(Capsule().fill(Color.secondary.opacity(0.15)))
+                                                        .foregroundColor(.secondary)
+                                                    }
+                                                    HStack(spacing: 10) {
+                                                        Text(result.url.deletingLastPathComponent().path)
+                                                            .lineLimit(1)
+                                                            .truncationMode(.middle)
+                                                        Spacer(minLength: 8)
+                                                        Text("\(result.width)×\(result.height) px • \(formatBytes(result.fileSize))")
+                                                    }
+                                                    .font(.callout)
+                                                    .foregroundColor(.secondary)
+                                                }
+                                                Spacer()
+                                                let colors = distanceColors(for: result.distance)
+                                                VStack(spacing: 2) {
+                                                    Text("\(similarityPercent(for: result.distance))%")
+                                                        .font(.title.weight(.heavy))
+                                                }
+                                                .padding(.horizontal, 14)
+                                                .padding(.vertical, 8)
+                                                .background(Capsule().fill(colors.bg))
+                                                .foregroundColor(colors.fg)
                                             }
-                                            .buttonStyle(.link)
-                                            Text(String(format: "(%.3f)", result.distance))
-                                                .font(.caption2)
-                                                .foregroundColor(.secondary)
-                                        }
-                                        Text("\(result.width)×\(result.height) px • \(formatBytes(result.fileSize))")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                        let root = containingRoot(for: result.url)
-                                        HStack(spacing: 6) {
-                                            Image(systemName: systemImageForFolder(root ?? result.url))
-                                                .foregroundColor(.secondary)
-                                            Text((root ?? result.url).lastPathComponent)
-                                                .font(.caption)
-                                                .foregroundColor(.secondary)
-                                        }
-                                    }
-                                    Spacer()
-                                }
-                                .padding(12)
-                                .background(.regularMaterial)
-                                .cornerRadius(10)
-                                .shadow(color: Color.black.opacity(0.06), radius: 6, x: 0, y: 2)
+                                            .padding(16)
+                                            .background(.regularMaterial)
+                                            .cornerRadius(12)
+                                            .shadow(color: Color.black.opacity(0.06), radius: 6, x: 0, y: 2)
                                         }
                                     }
                                     .padding(.vertical, 8)
@@ -748,6 +763,26 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    // MARK: - UI helpers
+    private func distanceColors(for distance: Float) -> (bg: Color, fg: Color) {
+        if distance <= 3 { // 1–3: green
+            return (Color.green.opacity(0.18), Color.green)
+        } else if distance <= 9 { // 4–9: yellow
+            return (Color.yellow.opacity(0.22), Color.orange)
+        } else { // 10+: neutral/secondary
+            return (Color.gray.opacity(0.18), Color.secondary)
+        }
+    }
+
+    /// Maps Hamming distance to a similarity percentage where
+    /// 0 -> 100%, 10 -> 50%, and linearly decreasing by 5% per step beyond 0.
+    /// Values below 0 are clamped to 0, above 100 to 100.
+    private func similarityPercent(for distance: Float) -> Int {
+        let clamped = max(0, min(10, Int(distance.rounded())))
+        let percent = 100 - clamped * 5
+        return max(0, min(100, percent))
     }
 
     // MARK: - Toast helpers
